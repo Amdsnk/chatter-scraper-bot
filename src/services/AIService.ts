@@ -1,8 +1,8 @@
+
 import { v4 as uuidv4 } from 'uuid';
 import { ApiResponse, ChatSession, Message, ScrapingResult } from '@/types';
+import ScraperService from './ScraperService';
 
-// Simulated API for demo purposes
-// In a real implementation, this would call your backend API
 class AIService {
   private sessions: Map<string, ChatSession> = new Map();
   private sessionTimeouts: Map<string, number> = new Map();
@@ -84,9 +84,8 @@ class AIService {
     };
     session.messages.push(newUserMessage);
     
-    // In a real implementation, this would call your backend AI service
-    // For demo, we'll simulate a response
-    const { text, results } = await this.simulateAIResponse(session, userMessage);
+    // Process the message and get real data
+    const { text, results } = await this.processUserQuery(session, userMessage);
     
     // Add assistant message to session
     const assistantMessage: Message = {
@@ -109,50 +108,72 @@ class AIService {
     };
   }
   
-  // Simulate AI response for demo purposes
-  private async simulateAIResponse(session: ChatSession, message: string): Promise<{ text: string; results: ScrapingResult[] }> {
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate processing time
-    
-    const url = session.currentUrl || 'https://herefordsondemand.com/find-a-breeder/';
-    
-    // Parse the user message to determine action
-    const messageLower = message.toLowerCase();
-    
-    // Sample data (in a real implementation, this would come from actual web scraping)
-    const sampleData: ScrapingResult[] = [
-      { name: 'Bar S Ranch', phone: '701-824-2046', location: 'MOTT ND' },
-      { name: 'Bayard Ranch Co', phone: '308-586-1345', location: 'BRIDGEPORT NE' },
-      { name: 'Beery Land & Livestock', phone: '580-821-4183', location: 'ALVA OK' },
-      { name: 'Bell Hereford Ranch', phone: '308-834-3494', location: 'THEDFORD NE' },
-      { name: 'Berg Farms', phone: '507-220-1946', location: 'PIPESTONE MN' },
-      { name: 'Biskner Herefords', phone: '605-848-0777', location: 'ONIDA SD' },
-      { name: 'Blackjack Cattle', phone: '701-220-6849', location: 'MOTT ND' },
-      { name: 'Blatchford Farms', phone: '701-797-3644', location: 'FINLEY ND' },
-      { name: 'Blue Iris Farms', phone: '620-793-2368', location: 'GREAT BEND KS' },
-      { name: 'Blueline Herefords', phone: '515-358-0134', location: 'JEFFERSON IA' },
-    ];
-    
-    let results: ScrapingResult[] = [];
-    let responseText = '';
-    
-    if (messageLower.includes('get all breeder') || messageLower.includes('all breeder')) {
-      results = sampleData;
-      responseText = "I've retrieved all breeders with their name, phone, and location information. Here are the results:";
-    } 
-    else if (messageLower.includes('page 1 until 3') || messageLower.includes('from page 1')) {
-      // Simulate pagination data (first 6 items representing pages 1-3)
-      results = sampleData.slice(0, 6);
-      responseText = "I've retrieved breeders from pages 1 to 3. Here are the results:";
-    }
-    else if (messageLower.includes('filter') && messageLower.includes('mott nd')) {
-      results = sampleData.filter(item => item.location === 'MOTT ND');
-      responseText = "I've filtered the data to show only breeders from MOTT ND. Here are the results:";
-    }
-    else {
-      responseText = "I understand you want information about breeders. Could you specify what data you need? For example, you can ask for all breeders' information or filter by specific criteria.";
+  // Process user query and scrape real data
+  private async processUserQuery(session: ChatSession, userMessage: string): Promise<{ text: string; results: ScrapingResult[] }> {
+    if (!session.currentUrl) {
+      return {
+        text: "Please set a URL to scrape first.",
+        results: []
+      };
     }
     
-    return { text: responseText, results };
+    const url = session.currentUrl;
+    const messageLower = userMessage.toLowerCase();
+    
+    try {
+      // Parse the message to determine scraping parameters
+      let pages = 1;
+      
+      if (messageLower.includes('page 1 until 3') || messageLower.includes('from page 1')) {
+        pages = 3;
+      } else if (messageLower.includes('all') || messageLower.includes('every')) {
+        pages = 5; // Limit to 5 pages for safety
+      }
+      
+      // Scrape the website
+      console.log(`Scraping URL: ${url}, Pages: ${pages}`);
+      const scrapedData = await ScraperService.scrapeUrl(url, pages);
+      
+      let responseText = "";
+      
+      if (scrapedData.length === 0) {
+        responseText = "I was unable to extract any data from this website. Please try a different URL or be more specific about what data you need.";
+      } else {
+        // Filter results if needed
+        let results = scrapedData;
+        
+        if (messageLower.includes('filter') && messageLower.includes('location')) {
+          // Extract location filter
+          const locationMatch = messageLower.match(/location(?:\s+is|\s+in|\s+equals|\s+contains|\s*:\s*|\s+)?[\s:]*([\w\s]+)/i);
+          const locationFilter = locationMatch ? locationMatch[1].trim().toUpperCase() : '';
+          
+          if (locationFilter) {
+            results = scrapedData.filter(item => 
+              item.location && item.location.toString().toUpperCase().includes(locationFilter)
+            );
+            responseText = `I've filtered the data to show only results with location containing '${locationFilter}'. Here are the results:`;
+          }
+        }
+        
+        if (messageLower.includes('all') || messageLower.includes('every') || messageLower.includes('get')) {
+          responseText = `I've retrieved data from ${url}. Here are the results:`;
+        }
+        
+        if (!responseText) {
+          responseText = `I've processed your request and extracted data from ${url}. Here are the results:`;
+        }
+        
+        return { text: responseText, results };
+      }
+      
+      return { text: responseText, results: scrapedData };
+    } catch (error) {
+      console.error('Error processing query:', error);
+      return {
+        text: "I encountered an error while processing your request. Please try again with a different URL or query.",
+        results: []
+      };
+    }
   }
 }
 
